@@ -1,0 +1,653 @@
+Del 1: XML queries for lab1
+1 Generate a list of all countries that do not have any islands.
+
+distinct-values(
+for $x in doc("mondial.xml")/mondial/country
+let $all_cc := $x/@car_code
+let $isl_cc := /mondial/island/@country
+where not($all_cc = $isl_cc)
+order by $x/name
+return $x/name
+)
+
+2 Generate the ratio between inland provinces (provinces not bordering any sea) to total number of provinces.
+(: Provinces not bordering sea :)
+let $someProv :=
+fn:count((for $x in doc("mondial.xml")//province/city
+where $x/located_at/@watertype != "sea"
+return ($x/name)))
+
+(: All provinces :)
+let$allProv :=
+fn:count((for $x in doc("mondial.xml")//province/city
+return ($x/name)))
+
+(: Ratio, rounded to 3 decimals :)
+return fn:round(($someProv div $allProv), 3)
+
+3 Generate a table of all the continents and the sum of the areas of all those lakes that contain at least one island for each continent. If a lake is in a country that is situated on several continents, the appropriate share of the lake area should be counted for each of those continents.
+let $db := doc("mondial.xml")
+
+let $round1 := (
+for $a in $db//island/@lake
+for $b in $db//lake
+for $c in $db//country
+for $cont in $db//continent
+for $x in $c/encompassed
+
+where $b/@id = $a and $b/@country = $c/@car_code and $cont/@id = $x/@continent
+
+order by $x/@continent
+return 
+    <area continent="{data($x/@continent)}" area="{data($x/@percentage)*data($b/area)*0.01}"/>
+)
+
+let $sumAmerica := ( 
+for $i1 in $round1
+where $i1/@continent = "america"
+return $i1/@area)
+
+let $sumAsia := ( 
+for $i2 in $round1
+where $i2/@continent = "asia"
+return $i2/@area)
+
+let $sumEurope := ( 
+for $i3 in $round1
+where $i3/@continent = "europe"
+return $i3/@area)
+
+let $sumAustralia := ( 
+for $i4 in $round1
+where $i4/@continent = "australia"
+return $i4/@area)
+
+let $v1 := sum($sumAmerica)
+let $v2 := sum($sumAsia)
+let $v3 := sum($sumEurope)
+let $v4 := sum($sumAustralia)
+return
+     (
+     <Continent name="Asia     " wierd_lake_area="{sum($v2)} m2"/>,
+     <Continent name="Europe   " wierd_lake_area="{sum($v3)}   m2"/>,
+     <Continent name="America  " wierd_lake_area="{sum($v1)}   m2"/>,
+     <Continent name="Australia" wierd_lake_area="{sum($v4)}   m2"/>
+)
+    
+4 Generate a table with the two continents that will have the largest and the smallest population increase fifty years from now given current population and growth rates, and the future population to current population ratios for these two continents.
+
+declare function local:lastPop($country){
+  let $last_measure := max($country/population/@year)
+  let $latestPop :=(
+    for $a in $country/population
+    where $a/@year = $last_measure
+    return $a)
+  return data($latestPop)
+};
+
+
+let $db:=doc("mondial.xml")
+
+let $continents:= data($db//continent/@id)
+
+let $res:=
+  for $continent in $continents
+  let $population:=
+    for $country in $db//country[encompassed/@continent = $continent]
+    return local:lastPop($country)
+  let $population_50:=
+    for $country in $db//country[encompassed/@continent = $continent]
+    return local:lastPop($country)*math:pow(1+$country/population_growth div 100, 50)
+  return
+    <continent id="{$continent}">
+      <current_pop>
+        {sum($population)}
+      </current_pop> 
+      <pop_in50>
+        {sum($population_50)}
+      </pop_in50>
+      <diff>
+        {sum($population_50)-sum($population)}
+      </diff>
+    </continent>
+
+let $test :=    
+  for $continent in $res
+  order by -$continent/diff
+  return $continent
+
+return ($test[1], $test[2])
+
+
+
+5 Generate the name of the organisation that is headquartered in Europe, has
+International in its name and has the largest number of European member countries.
+
+let $db := doc("mondial.xml")
+let $eur_cities := $db//country/encompassed[@continent="europe"]/..//city/@id
+let $eur_countries := $db//country/encompassed[@continent="europe"]
+
+let $inter_eu_org :=(
+  for $x in doc("mondial.xml")//organization[contains(name, 'International')]
+  where $x/@headq = $eur_cities
+  return $x )
+  
+let $eur_country_mships :=(
+    for $z in $eur_countries/../@car_code
+    let $z2 := concat(' ',$z,' ') 
+    let $y := $inter_eu_org/members/.[matches(@country, $z2)]
+    return
+     <test>  
+        <country_name> {$z/../name} </country_name>
+        <org_name> {$y/../name} </org_name>
+     </test>)
+
+let $mash :=(
+  for $org in $inter_eu_org/name
+  let $a := count($eur_country_mships/matches(org_name, $org))
+  let $b := $eur_country_mships/matches(org_name, $org)
+  for $b2 in $b
+  where $b2 = true()
+  return <name> {data($org)} </name>)
+
+let $finally :=(
+  for $x in $inter_eu_org/name
+  let $counter :=(
+  for $a in $mash
+  where $a = $x
+  return $a
+  )
+  order by -count($counter)
+  return <organization name='{$x}'> {count($counter)} </organization>)
+
+for $node in $finally
+where $node = max($finally)
+return $node
+
+6 Generate a table of city names and related airport names for all the cities that have at least 100,000 inhabitants, are situated in America and where the airport is elevated above 500 m.
+
+let $db := doc("mondial.xml")
+let $cities := $db//country[@car_code="USA"]//city
+let $airport := $db//airport[@country="USA"]
+
+for $c in $cities, $a in $airport
+where $c/population >= 100000 and $a/elevation > 500 and $a/@city = $c/@id
+return <node city="{$c/name}" airport="{$a/name}"/>
+
+7 Generate a table of countries and the ratio between their latest reported and earliest
+reported population figures, rounded to one decimal point, for those countries where this ratio is above 10, that is to say those that have grown at least 10-fold between earliest and latest population count.
+
+let $db := doc("mondial.xml")
+
+for $c in $db//country
+  let $first_fig := min($c/population/@year)
+  let $last_fig := max($c/population/@year)
+  
+  let $a1 :=(
+    for $a in $c/population
+    where $a/@year = $first_fig
+    return $a )
+    
+  let $b1 :=(
+    for $b in $c/population
+    where $b/@year = $last_fig
+    return $b )
+  
+  let $ratio := round(($b1 div $a1),1)
+  
+  where $ratio > 10
+  order by $ratio
+  return 
+    <ratio country="{$c/name}" first="{$first_fig}" last="{$last_fig}">
+      {$ratio}
+    </ratio>
+8 Generate a table with the three (3) cities above 5,000,000 inhabitants that form the largest triangle between them, measured as the total length of all three triangle legs, and that total length.
+let $db := doc("mondial.xml"),
+
+$cities := $db//city[data(population) >= 5000000 ],
+
+(: GENERATE ALL COMBINATIONS OF LENGTHS BETWEEN THE CHOSEN CITIES :)
+$distances := (
+  for $c1 in $cities, $c2 in $cities
+  where data($c1/name) < data($c2/name)
+  return if($c1//longitude < 0 and $c2//longitude>0) then (
+    <dist city1="{$c1/name}" city2="{$c2/name}">
+        {
+          math:sqrt(math:pow($c2//latitude - $c1//latitude + 180,2)+math:pow($c2//longitude - $c1//longitude,2))
+        }
+      </dist>
+  )else if ($c1//longitude > 0 and $c2//longitude<0) then (
+    <dist city1="{$c1/name}" city2="{$c2/name}">
+        {
+          math:sqrt(math:pow($c2//latitude - $c1//latitude + 180,2)+math:pow($c2//longitude - $c1//longitude,2))
+        }
+      </dist>)
+    else (
+    <dist city1="{$c1/name}" city2="{$c2/name}">
+        {
+          math:sqrt(math:pow($c2//latitude - $c1//latitude,2)+math:pow($c2//longitude - $c1//longitude,2))
+        }
+     </dist>)
+),
+
+(: GENERATE ALL COMBINATIONS OF TRIANGLES WITH OUR TRIANGLE LEGS :)
+$triangles :=
+for $l1 in $distances
+return (
+  for $l2 in $distances
+  return (
+    for $l3 in $distances
+    (: Remove duplicates of these combinations :)
+    where $l1/@city1 < $l1/@city2 and $l1/@city1 < $l2/@city2 and $l1/@city2 < $l2/@city2 and $l1/@city1 = $l2/@city1
+    and $l2/@city2 = $l3/@city1 and $l3/@city2 = $l1/@city2
+    return
+      <triangle city1="{$l1/@city1}" city2="{$l1/@city2}" city3="{$l3/@city1}">
+          {
+            data($l1) + data($l2) + data($l3)
+          }
+      </triangle>
+  )
+
+)
+let $y:=
+    for $x in $triangles
+    order by -$x
+    return $x
+  
+return $y[1]
+
+
+
+9 Generate a table that contains the rivers Rhein, Nile and Amazonas, and the longest total length that the river systems feeding into each of them contain (including their own respective length). You must calculate the respective river systems of tributary rivers recursively.
+
+(: 9 Generate a table that contains the rivers Rhein, Nile and Amazonas, and the longest total length that the river systems feeding into each of them contain (including their own respective length). You must calculate the respective river systems of tributary rivers recursively. :)
+
+declare variable $db := doc("mondial.xml");
+declare variable $rivers := $db//river;
+
+declare function local:recursive(
+   $queue as element(river)*,
+   $result as element(river)*   
+) as element(river)*{
+   if (empty($queue)) then (
+      tail($result) )
+   else (
+      let $head := head($queue)
+      let $rest := tail($queue)
+      let $more := $head/to/@water[not(. = ($queue, $result)/@id)]
+      return
+         local:recursive(
+            ( $rest, $rivers[@id = $more] ),
+            ( $result, $head )) )
+};
+
+(:---------------------------------------------------------------------------:)
+let $names := ("river-Nil", "river-Amazonas", "river-Rhein")
+
+let $supply :=(
+for $r in $rivers
+order by $r/@id
+let $path := local:recursive($r, ())
+for $name in $names
+    where matches((string-join($path/@id, ', ')), $name )
+    return
+       <supply name="{$r/@id}" length="{data($r/length)}"> 
+         <rivers>
+           {data($r/@id)}, {string-join($path/@id, ', ')}
+         </rivers>
+         <total_length>
+         {sum(($path/number(length), number($r/length)))}
+         </total_length>
+       </supply>)
+let $finally := (
+  for $name in $names
+    let $x := (
+      for $s in $supply
+      where matches($s/rivers, $name)
+      return
+         <node rivers ="{$s//rivers}">
+         {data($s//total_length)}
+         </node>)
+    return (
+      <result name="{$name}">
+      {max($x)}
+    </result>) )
+return $finally
+
+B. Which countries are members of all the organizations whose names start with the word “International” and are headquartered in Europe? None.
+
+
+(: B. Which countries are members of all the organizations whose names start with the word “International” and are headquartered in Europe? :)
+
+let $db := doc("mondial.xml")
+let $eur_cities := $db//country/encompassed[@continent="europe"]/..//city/@id
+let $eur_countries := $db//country/encompassed[@continent="europe"]
+
+let $inter_eu_org :=(
+  for $x in doc("mondial.xml")//organization[contains(name, 'International')]
+  where $x/@headq = $eur_cities
+  return $x
+  )
+  
+let $eur_country_mships :=(
+    for $z in $eur_countries/../@car_code
+    let $z2 := concat(' ',$z,' ') 
+    let $y := $inter_eu_org/members/.[matches(@country, $z2)]
+    return
+     <node>  
+        <country_name> {$z/../name} </country_name>
+        <org_name> {$y/../name} </org_name>
+     </node>
+)
+
+let $mash2 :=(
+  let $nr_orgs := count($inter_eu_org/name)
+  for $country in $eur_country_mships
+  let $nr_mships := count($country/org_name/name)
+  order by -($nr_mships)
+  let $bool := $nr_mships eq $nr_orgs
+  return 
+      <result name="{$country/country_name}" memberships="{$nr_mships}"
+       of="{$nr_orgs}" member_of_all="{$bool}"/>
+)
+
+return $mash2
+
+
+
+
+
+C1. Generate a list of all the countries that are reachable by land border crossing from Sweden under the above conditions, by showing the countries that you can reach at each new border crossing and the crossing number for each such group of countries.
+
+(:—Initial declarations.——————————————————————————————————————————————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare namespace functx = "http://www.functx.com";
+declare variable $db := doc("mondial.xml");
+
+
+(:—Used to check if a car_code exists in  $allowedCC.—————————————————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function functx:is-value-in-sequence(
+        $value as xs:anyAtomicType?,
+        $seq as xs:anyAtomicType* 
+        ) as xs:boolean {
+    $value = $seq 
+};
+
+
+(:—Used to remove car_codes from $allowedCC.———————————————————-——————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function functx:value-except( 
+        $arg1 as xs:anyAtomicType*,
+        $arg2 as xs:anyAtomicType* 
+        ) as xs:anyAtomicType* {
+          
+    distinct-values($arg1[not(.=$arg2)])
+};
+
+
+(:—Fetches all allowed (not-visited) car_codes bordering a given car_code.————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function local:getBorderingCC(
+        $id as xs:string*,
+        $allowedCC as xs:string*
+        ) as xs:string* {
+        
+    (: 1. Loop through bordering countries $c and make sure they're allowed.  :)
+    (: 2. Return all allowed (non-visited) bordering countries.               :)      
+          
+    let $borderingCC := $db//country[@car_code = $id]/border/@country
+    for $c in $borderingCC
+    where functx:is-value-in-sequence($c, $allowedCC)
+    return $c 
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function local:getDepth(
+        $depth as xs:decimal*,
+        $maxDepth as xs:decimal*,
+        $countries as xs:string*,
+        $allowedCC as xs:string*
+        ) as xs:string* {
+          
+    if ($depth = $maxDepth) 
+    then (
+         (: Reached correct depth. Return countries bordering $countries. :)
+         for $c in $countries
+         return local:getBorderingCC($c, $allowedCC)) 
+    else (
+         (: Go deeper as depth<maxdepth :)
+         (: Get the bordering countries for each country in $countries list :)
+         for $c in $countries
+         let $b := local:getBorderingCC($c,$allowedCC)
+         (: Remove $c's borderings ($b) from $allowedCC before proceeding :)
+         let $new_allowedCC := functx:value-except($allowedCC, $b)
+         (: Go deeper :)
+         return local:getDepth( $depth+1, $maxDepth, $b, $new_allowedCC)
+    )
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function local:pathFinder(
+        $depth as xs:decimal*, 
+        $country as xs:string*, 
+        $allowedCC as xs:string*
+        ) as element()* {
+          
+  (: Children not visited :)
+  
+  (: $reachable =  border-countries to $allowedCC not already visited. :)
+  let $reachable := distinct-values(local:getDepth(1,1, $country, $allowedCC))
+  
+  (: Clear reachable countries from $allowedCC :)
+  let $new_allowedCC := functx:value-except($allowedCC, $reachable)
+      
+  return 
+        if (empty($reachable)) then ()
+        else (
+              <reach depth="{$depth}" reaches="{$reachable}" />, 
+              local:pathFinder($depth+1, $reachable, $new_allowedCC))
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+(:—————————Main query, using the above declared functions—————————————————————:)
+
+for $c in $db//country[@car_code="S"]/@car_code
+    let $country := ($c)
+      , $allowedCCs := $db//country[@car_code != $country]/@car_code
+      
+return 
+       <result for_country="{$c/../name}">
+       { local:pathFinder(1, $country, $allowedCCs) }
+       </result>
+
+
+
+
+
+
+
+
+
+C2. Generate a list of countries that have the highest number of possible border crossings to some other country, and show which countries those most distant countries are for each such starting country.
+
+
+(:—Initial declarations.——————————————————————————————————————————————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare namespace functx = "http://www.functx.com";
+declare variable $db := doc("mondial.xml");
+
+
+(:—Used to check if a car_code exists in  $allowedCC.—————————————————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function functx:is-value-in-sequence(
+        $value as xs:anyAtomicType?,
+        $seq as xs:anyAtomicType* 
+        ) as xs:boolean {
+    $value = $seq 
+};
+
+
+(:—Used to remove car_codes from $allowedCC.———————————————————-——————————————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function functx:value-except( 
+        $arg1 as xs:anyAtomicType*,
+        $arg2 as xs:anyAtomicType* 
+        ) as xs:anyAtomicType* {
+          
+    distinct-values($arg1[not(.=$arg2)])
+};
+
+
+(:—Fetches all allowed (not-visited) car_codes bordering a given car_code.————:)
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function local:getBorderingCC(
+        $id as xs:string*,
+        $allowedCC as xs:string*
+        ) as xs:string* {
+        
+    (: 1. Loop through bordering countries $c and make sure they're allowed.  :)
+    (: 2. Return all allowed (non-visited) bordering countries.               :)      
+          
+    let $borderingCC := $db//country[@car_code = $id]/border/@country
+    for $c in $borderingCC
+    where functx:is-value-in-sequence($c, $allowedCC)
+    return $c 
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+declare function local:getDepth(
+        $depth as xs:decimal*,
+        $maxDepth as xs:decimal*,
+        $countries as xs:string*,
+        $allowedCC as xs:string*
+        ) as xs:string* {
+          
+    if ($depth = $maxDepth) 
+    then (
+         (: Reached correct depth. Return countries bordering $countries. :)
+         for $c in $countries
+         return local:getBorderingCC($c, $allowedCC)) 
+    else (
+         (: Go deeper as depth<maxdepth :)
+         (: Get the bordering countries for each country in $countries list :)
+         for $c in $countries
+         let $b := local:getBorderingCC($c,$allowedCC)
+         (: Remove $c's borderings ($b) from $allowedCC before proceeding :)
+         let $new_allowedCC := functx:value-except($allowedCC, $b)
+         (: Go deeper :)
+         return local:getDepth( $depth+1, $maxDepth, $b, $new_allowedCC)
+    )
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+
+declare function local:pathFinder(
+        $depth as xs:decimal*, 
+        $country as xs:string*, 
+        $allowedCC as xs:string*
+        ) as element()* {
+          
+  (: Children not visited :)
+  
+  (: $reachable =  border-countries to $allowedCC not already visited. :)
+  let $reachable := distinct-values(local:getDepth(1,1, $country, $allowedCC))
+  
+  (: Clear reachable countries from $allowedCC :)
+  let $new_allowedCC := functx:value-except($allowedCC, $reachable)
+      
+  return 
+        if (empty($reachable)) then ()
+        else (
+              <reach depth="{$depth}" reaches="{$reachable}"/>, 
+              local:pathFinder($depth+1, $reachable, $new_allowedCC))
+};
+
+
+(:————————————————————————————————————————————————————————————————————————————:)
+(:—————————Main query, using the above declared functions—————————————————————:)
+
+for $c in $db//country/@car_code
+    let $country := ($c)
+      , $allowedCCs := $db//country[@car_code != $country]/@car_code
+      , $x := local:pathFinder(1, $country, $allowedCCs)
+      , $y := $x[@depth=max($x/@depth)]
+      
+where ($y)
+order by -($y/@depth)
+return 
+         <result for_country="{$c/../name}">
+           {$y}
+         </result>
+
+
+
+
+
+D. Download the songs.xml database from the Lab 3 files on Canvas.
+Now write a query that inverts all the sub elements of the /music element so that their own sub elements become attributes and their attributes become sub elements. For those sub elements that lack sub elements of their own, their data content should become an attribute with the name “value”.
+
+let $db := doc("songs.xml")
+let $newdb :=
+    element music {
+        for $subelem in $db//music/*
+        return
+           element {(name($subelem))}
+                    { (for $subsub in $subelem/* return attribute {name($subsub)} {$subsub/data()}),
+                        (for $attr in $subelem/@* return element {name($attr)}{$attr/data()}) }
+    }
+
+return $newdb
+(:————————————————————————————————————————————:)
+let $db := doc("songs.xml"),
+$album := $db//album,
+$song := $db//song,
+$artist := $db//artist,
+$newmusic :=
+<music>
+{(
+  for $s in $song
+  return
+  <song name="{$s/name}" nr="{$s/nr}">
+    {
+      element genre { $s/@genre/string() },
+      element album { $s/@album/string()},
+      element artist { $s/@artist/string()},
+      element id { $s/@id/string()}
+    }
+  </song>
+  ), (
+   for $a in $artist
+   return
+   <artist name="{$a/data()}">
+     {
+       element id {$a/@id/string()},
+       element isband {$a/@id/string()}
+     }
+   </artist>
+   ), (
+   for $al in $album
+   return
+   <album name="{$al/data()}">
+     {
+       element issued {$al/@issued/string()},
+       element id {$al/@id/string()},
+       element label {$al/@label/string()},
+       element performers { if(empty($al/@performers) )then "value" else $al/@performers/string()}
+     }
+   </album>)}
+</music>
+
+
+return $newmusic
+
+
+————————————————
+declare variable $db := (doc('mondial.xml')); 
+(:----------------------------------------------------------------------------:)
+
