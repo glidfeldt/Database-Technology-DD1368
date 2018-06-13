@@ -1,2 +1,6 @@
 # Database-Technology-DD1368
-The overall aim of the course is to equip you with the skills to model and implement database solutions. 
+The overall aim of this course was to equip students with the skills to model and implement database solutions. The course included three labs:
+
+## LAB1: SQL Queries
+## LAB2: CRM System
+## Lab3: XML Queries
