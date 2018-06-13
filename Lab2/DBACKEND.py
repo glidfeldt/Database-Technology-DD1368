@@ -7,7 +7,7 @@ from time import gmtime, strftime
 
 class Database():
     def __init__(self):
-        self.connection = psycopg2.connect("host=localhost, dbname=postgres")
+        self.connection = psycopg2.connect("host=host, dbname=postgres")
         self.connection.autocommit=True
         self.cursor = self.connection.cursor(cursor_factory = psycopg2.extras.DictCursor)
 
