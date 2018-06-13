@@ -1,0 +1,254 @@
+--1. Generate a list OF ALL countries that DO NOT have ANY islands.
+WITH CTE1 (island, country, province, name, code, capital) AS
+(
+SELECT * FROM geo_island 
+RIGHT OUTER JOIN country
+ON geo_island.country = country.code
+)
+----TOP LEVEL SELECT STATEMENT----
+SELECT name
+FROM CTE1
+WHERE island IS NULL
+ORDER BY name
+
+
+--2. Generate the ratio BETWEEN inland provinces (provinces NOT bordering ANY sea) TO total number OF provinces.
+WITH seaprovinces(numb) AS (
+SELECT cast(count(DISTINCT province) AS FLOAT)
+FROM geo_sea),
+
+allprovinces(numb) AS (
+SELECT cast(count(*) AS FLOAT)
+FROM province)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT 1-seaprovinces.numb/allprovinces.numb AS RESULT, ALLPROVINCES.NUMB
+FROM allprovinces, seaprovinces
+
+--3. Generate a table of all the continents and the sum of the areas of all those lakes that contain at least one island for each continent. If a lake is in a country that is situated on several continents, the appropriate share of the lake area should be counted for each of those continents.
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT DISTINCT continent, SUM(lake.area*percentage/100) AS total_area
+FROM islandin, lake, geo_lake, encompasses, country
+WHERE lake.name = geo_lake.lake AND geo_lake.country = encompasses.country AND islandin.lake IS NOT NULL AND geo_lake.country = country.code AND islandin.lake = lake.name
+GROUP BY continent
+ORDER BY total_area
+
+
+
+--4. Generate a table with the two continents that will have the largest and the smallest population increase fifty years from now given current population and growth rates, and the future population to current population ratios for these two continents. 
+WITH 
+CTE1 (cont, name, pop, pop_g, pop_in_50) AS
+(
+SELECT continent, name, population, population_growth, ROUND((population*POWER(((population_growth/100)+1), 50)), 0) AS test
+FROM encompasses, country, population
+WHERE encompasses.country = country.code AND country.code = population.country
+), 
+CTE2 (cont, pop_sum, pop_in_50_sum, ratio) AS
+(
+SELECT cont, SUM(pop) AS pop_sum, SUM(pop_in_50) AS pop_in_50_sum,(SUM(pop_in_50)/SUM(pop)) AS ratio
+FROM CTE1
+GROUP BY cont
+),
+/*
+CTE3 (cont, pop_sum, pop_in_50_sum, ratio) AS
+(SELECT *
+FROM cte2
+ORDER BY ratio DESC
+),*/
+MAXgrow(ratio)AS
+(SELECT MAX(ratio)
+FROM cte2
+),
+
+mingrow(ratio)AS
+(SELECT min(ratio)
+FROM cte2
+),
+MAXmin(ratio) AS
+(SELECT ratio
+FROM MAXgrow
+UNION 
+SELECT ratio
+FROM MINgrow)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT cont, cte2.ratio
+FROM cte2 INNER JOIN maxmin ON cte2.ratio=maxmin.ratio
+
+--5. Generate the name OF the organisation that IS headquartered IN Europe, has International inits name AND has the largest number OF European MEMBER countries. 
+WITH cte1(name, city, abbreviation) AS
+(SELECT name, city, abbreviation
+FROM organization
+WHERE organization.name LIKE '%International%'),
+
+cte2(name, city, country, abbreviation) AS
+(SELECT cte1.name, cte1.city, city.country, cte1.abbreviation
+FROM cte1 INNER JOIN city ON
+city.name=cte1.city),
+
+cte3(name, abbreviation) AS
+(SELECT cte2.name, cte2.abbreviation
+FROM cte2 INNER JOIN encompasses ON cte2.country=encompasses.country
+WHERE encompasses.continent='Europe'),
+
+cte4(abbreviation) AS
+(SELECT ismember.organization
+FROM ismember INNER JOIN encompasses ON ismember.country=encompasses.country
+WHERE ismember.type='member' AND encompasses.continent='Europe'),
+
+cte5(name) AS
+(SELECT name
+FROM cte3 INNER JOIN cte4 ON cte4.abbreviation=cte3.abbreviation),
+
+cte6(name, memberships) AS
+(SELECT name, COUNT(name)
+FROM cte5
+GROUP BY name),
+
+cte7(row, name, count) AS
+(SELECT row_number() over(ORDER BY memberships desc), name, memberships
+FROM cte6)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT name
+FROM cte7
+WHERE row=1
+
+
+
+--6. Generate a TABLE OF city names AND related airport names FOR ALL the cities that have AT least 100,000 inhabitants, ARE situated IN America AND WHERE the airport IS elevated above 500 m.
+SELECT airport.city AS CityName, airport.name AS AirportName
+FROM city, airport, encompasses
+WHERE city.population >= 100000 AND airport.city=city.name AND encompasses.country=city.country AND airport.elevation>500 AND encompasses.continent='America'
+ORDER BY airport.name
+
+--7. Generate a TABLE OF countries AND the ratio BETWEEN their latest reported AND earliest reported population figures, rounded TO one DECIMAL point, FOR those countries WHERE this ratiois above 10, that IS TO say those that have grown AT least 10-fold BETWEEN earliest AND latest population count.
+
+WITH 
+YEARMIN(country, year) AS
+(
+SELECT country, Min(year)
+FROM countrypops
+GROUP BY country
+), popearly(country, YEAR, pop) AS
+(
+SELECT countrypops.country, countrypops.year, countrypops.population
+FROM countrypops
+INNER JOIN yearmin ON countrypops.country=yearmin.country AND countrypops.year=yearmin.year
+ORDER BY countrypops.country
+), YEARMAX(country, year) AS
+(
+SELECT country, max(year)
+FROM countrypops
+GROUP BY country
+), poplast(country, YEAR, pop) AS
+(
+SELECT countrypops.country, countrypops.year, countrypops.population
+FROM countrypops
+INNER JOIN yearmax ON countrypops.country=yearmax.country AND countrypops.year=yearmax.year
+ORDER BY countrypops.country
+), growth(country, growth) AS (
+SELECT popearly.country, poplast.pop/popearly.pop AS Growth
+FROM popearly, poplast
+WHERE popearly.country=poplast.country)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT country, growth
+FROM growth
+WHERE growth>10
+ORDER BY growth
+
+--8. Generate a table with the three (3) cities above 5,000,000 inhabitants that form the largest triangle between them, measured as the total length of all three triangle legs, and that total length.
+
+The equator is divided into 360 degrees of longitude, so each degree at the equator represents 111,319.9 meters or approximately 111.32 km.
+
+
+
+WITH 
+CTE1(name, lat, long) AS
+(
+SELECT name, latitude, longitude
+FROM city
+WHERE population>5000000
+),
+
+CTE2 (START, finish, dist) AS
+(
+SELECT tab2.name AS START , tab1.name AS finish, CASE
+                                WHEN tab1.long<0 AND tab2.long>0 THEN
+                                sqrt(power(tab2.lat-(180+tab1.lat), 2)+power(tab2.long-tab1.long, 2))
+                                WHEN tab1.long>0 AND tab2.long<0 THEN
+                                sqrt(power((180+tab2.lat)-tab1.lat, 2)+power(tab2.long-tab1.long, 2))
+                                ELSE sqrt(power(tab2.lat-tab1.lat, 2)+power(tab2.long-tab1.long, 2))
+                                END AS dist
+FROM CTE1 AS tab1
+INNER JOIN CTE1 AS tab2 ON tab1.name!=tab2.name
+ORDER BY START, dist ASC
+),
+CTE3 (start, middle1, dist1, middle2, finish, dist2) AS
+(
+SELECT * FROM CTE2
+CROSS JOIN CTE2 AS CTE2b
+WHERE CTE2.start != CTE2b.finish AND CTE2.finish = CTE2b.start
+),
+
+CTE4 (start, middle1, dist1, middle2, finish, dist2, start2, finish2, dist3) AS
+(
+SELECT * FROM CTE3
+CROSS JOIN CTE2
+WHERE CTE3.start = CTE2.finish AND CTE3.finish = CTE2.start
+),
+
+CTE5 (Name1, Name2, Name3, TotDist) AS
+(
+SELECT start, middle2, finish, dist1+dist2+dist3 AS TotDist
+FROM CTE4
+ORDER BY TotDist DESC
+)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT *
+FROM cte5
+FETCH first 1 ROWS ONLY
+
+
+
+
+
+--9. Generate a table that contains the rivers
+Rhein, Nile and Amazonas, and the longest total length that the river systems feeding into each of them contain (including their own respective length). You
+must calculate the respective river systems of tributary rivers recursively.
+WITH RECURSIVE
+RecursiveCTE (name, river, length, length2, lvl, trace) AS
+(
+SELECT name, river, length, length AS length2, 1 AS lvl, river AS trace, river AS trace2
+FROM river
+WHERE name = 'Nile' OR name = 'Amazonas' OR name = 'Rhein'
+UNION ALL
+SELECT d.name AS name, d.river, d.length, RecursiveCTE.length2+d.length AS length2, RecursiveCTE.lvl + 1 AS lvl, RecursiveCTE.river AS trace, RecursiveCTE.trace AS trace2
+FROM river d
+INNER JOIN RecursiveCTE ON RecursiveCTE.name = d.river
+LEFT JOIN river t ON RecursiveCTE.trace = t.name
+),
+
+SortCTE (max_length, river_system) AS 
+(
+SELECT length2 AS max_length,
+ CASE
+  WHEN (river IS NULL) THEN name
+  WHEN (trace IS NULL) THEN river
+  WHEN (trace2 IS NULL) THEN trace
+  ELSE trace2
+ END AS river_system
+FROM RecursiveCTE
+ORDER BY river_system, max_length
+),
+
+PickCTE (max_length, river_system) AS 
+(SELECT max(max_length), river_system FROM SortCTE
+WHERE river_system = 'Nile' OR river_system = 'Amazonas' OR river_system = 'Rhein'
+GROUP BY river_system)
+
+----TOP LEVEL SELECT STATEMENT----
+SELECT * FROM PickCTE
